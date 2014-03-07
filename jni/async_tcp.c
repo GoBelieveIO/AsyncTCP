@@ -264,6 +264,10 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
 JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
     int sock = getSock(env, object);
     setEvents(env, object, 0);
+    jweak self = getSelf(env, object);
+    (*env)->DeleteWeakGlobalRef(env, self);
+    setSelf(env, object, NULL);
+
     ALooper* looper = ALooper_forThread();
     ALooper_removeFd(looper, sock);
 }
