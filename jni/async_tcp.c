@@ -114,6 +114,11 @@ static int on_write(int fd, jobject object) {
 
     int sock = getSock(env, object);
     jbyteArray data = getData(env, object);
+    if (data == NULL) {
+        ALooper* looper = ALooper_forThread();
+        ALooper_removeFd(looper, fd);
+        return 0;
+    }
     jsize len = (*env)->GetArrayLength(env, data);
     jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
     n = write_data(fd, bytes, len);
