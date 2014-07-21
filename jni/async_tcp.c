@@ -96,6 +96,22 @@ static void call_connect_cb(JNIEnv *env, jobject object, int status) {
         call_onConnect(env, cb, object, status);
 }
 
+static void clearOutputEvent(JNIEnv *env, jobject object, int sock) {
+    int events = getEvents(env, object);
+    int mask = ALOOPER_EVENT_OUTPUT;
+    events &= (~mask);
+    setEvents(env, object, events);
+    if (events) {
+        ALooper* looper = ALooper_forThread();
+        jweak ref = getSelf(env, object);
+        ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, 
+                      events, callback, ref);
+    } else {
+        ALooper* looper = ALooper_forThread();
+        ALooper_removeFd(looper, sock);
+    }
+}
+
 static int on_write(int fd, jobject object) {
     int n;
     JNIEnv *env = getEnv();
@@ -115,8 +131,7 @@ static int on_write(int fd, jobject object) {
     int sock = getSock(env, object);
     jbyteArray data = getData(env, object);
     if (data == NULL) {
-        ALooper* looper = ALooper_forThread();
-        ALooper_removeFd(looper, fd);
+        clearOutputEvent(env, object, sock);
         return 0;
     }
     jsize len = (*env)->GetArrayLength(env, data);
@@ -134,19 +149,7 @@ static int on_write(int fd, jobject object) {
         setData(env, object, d);
         (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
         if (!left) {
-            int events = getEvents(env, object);
-            int mask = ALOOPER_EVENT_OUTPUT;
-            events &= (~mask);
-            setEvents(env, object, events);
-            if (events) {
-                ALooper* looper = ALooper_forThread();
-                jweak ref = getSelf(env, object);
-                ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, 
-                              events, callback, ref);
-            } else {
-                ALooper* looper = ALooper_forThread();
-                ALooper_removeFd(looper, fd);
-            }
+            clearOutputEvent(env, object, sock);
         }
         return 0;
     }
