@@ -20,7 +20,7 @@ public class AsyncTCP {
     public void setReadCallback(TCPReadCallback cb) {
 	readCallback = cb;
     }
-    public native void connect(String host, int port);
+    public native boolean connect(String host, int port);
     public native void close();
 
     public native void writeData(byte[] bytes);

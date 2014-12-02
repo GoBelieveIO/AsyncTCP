@@ -278,9 +278,10 @@ JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
 
     ALooper* looper = ALooper_forThread();
     ALooper_removeFd(looper, sock);
+    close(sock);
 }
 
-JOWW(void, AsyncTCP_connect)(JNIEnv *env, jobject object,  	
+JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
                              jstring host, jint port) {
     int r;
     int sockfd;
@@ -290,7 +291,7 @@ JOWW(void, AsyncTCP_connect)(JNIEnv *env, jobject object,
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
     	LOG("socket err:%d", errno);
-    	return;
+        return JNI_FALSE;
     }
     sock_nonblock(sockfd, 1);
 
@@ -305,8 +306,8 @@ JOWW(void, AsyncTCP_connect)(JNIEnv *env, jobject object,
     if (r == -1) {
         if (errno != EINPROGRESS) {
             LOG("connect error:%d", errno);
-            call_connect_cb(env, object, errno);
-            return;
+            close(sockfd);
+            return JNI_FALSE;
         }
     }
 
@@ -318,6 +319,7 @@ JOWW(void, AsyncTCP_connect)(JNIEnv *env, jobject object,
     setSelf(env, object, ref);
     ALooper* looper = ALooper_forThread();
     ALooper_addFd(looper, sockfd, ALOOPER_POLL_CALLBACK, events, callback, ref);
+    return JNI_TRUE;
 }
 
 jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
