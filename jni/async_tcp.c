@@ -123,6 +123,10 @@ static int on_write(int fd, jobject object) {
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorsize);
         if (error == EINPROGRESS)
             return 0;
+
+        if (error != 0) {
+            LOG("connect error:%d, %s", error, strerror(error));
+        }
         setConnecting(env, object, 0);
         call_connect_cb(env, object, error);
         return 0;
@@ -191,8 +195,16 @@ static void on_error(int fd, jobject object) {
     jboolean connecting;
     connecting = getConnecting(env, object);
     if (connecting) {
+        int error = 0;
+        socklen_t errorsize = sizeof(int);
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorsize);
+        if (error == 0) {
+            error = -1;
+        } else {
+            LOG("connect error:%d, %s", error, strerror(error));
+        }
         setConnecting(env, object, 0);
-        call_connect_cb(env, object, -1);
+        call_connect_cb(env, object, error);
     } else {
         call_read_cb(env, object, NULL, 0);
     }
@@ -305,7 +317,7 @@ JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
     } while (r == -1 && errno == EINTR);
     if (r == -1) {
         if (errno != EINPROGRESS) {
-            LOG("connect error:%d", errno);
+            LOG("connect error:%d, %s", errno, strerror(errno));
             close(sockfd);
             return JNI_FALSE;
         }
