@@ -5,9 +5,11 @@ import java.lang.ref.WeakReference;
 public class AsyncTCP {
     private int sock;
     private int events;
+    private int state;
+    private long ssl;
+    private long sslCTX;
 
     private byte[] data;
-    private boolean connecting;
     
     private TCPConnectCallback connectCallback;
     private TCPReadCallback readCallback;

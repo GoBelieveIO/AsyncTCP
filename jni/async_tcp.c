@@ -15,8 +15,9 @@
 #include <errno.h>
 #include <netdb.h>
 #include <assert.h>
-
+#include <openssl/ssl.h>
 #include "socket.h"
+
 
 
 #define JOWW(rettype, name)                                             \
@@ -31,6 +32,15 @@
 #define  LOG(...)  do {} while (0)
 #endif
 
+#define BUF_SIZE (64*1024)
+
+enum AsyncTCPState{
+    TCP_CONNECTING,
+    TCP_SSL_CONNECTING,
+    TCP_READING,
+    TCP_WRITING
+};
+
 
 static JavaVM* javavm = NULL;
 
@@ -40,9 +50,15 @@ static int callback(int fd, int events, void* data);
 
 static jweak getSelf(JNIEnv *env, jobject object);
 static void setSelf(JNIEnv *env, jobject object, jweak self);
-static jboolean getConnecting(JNIEnv *env, jobject object);
 
-static void setConnecting(JNIEnv *env, jobject object, jboolean connecting);
+static SSL_CTX* getSSLCTX(JNIEnv *env, jobject object);
+static void setSSLCTX(JNIEnv *env, jobject object, SSL_CTX *ctx);
+
+static SSL* getSSL(JNIEnv *env, jobject object);
+static void setSSL(JNIEnv *env, jobject object, SSL *ssl);
+
+static int getState(JNIEnv *env, jobject object);
+static void setState(JNIEnv *env, jobject object, int state);
 
 static int getSock(JNIEnv *env, jobject object);
 
@@ -96,28 +112,42 @@ static void call_connect_cb(JNIEnv *env, jobject object, int status) {
         call_onConnect(env, cb, object, status);
 }
 
-static void clearOutputEvent(JNIEnv *env, jobject object, int sock) {
+
+static void suspendWriteEvent(JNIEnv *env, jobject object, int sock) {
     int events = getEvents(env, object);
     int mask = ALOOPER_EVENT_OUTPUT;
-    events &= (~mask);
-    setEvents(env, object, events);
-    if (events) {
-        ALooper* looper = ALooper_forThread();
-        jweak ref = getSelf(env, object);
-        ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, 
-                      events, callback, ref);
-    } else {
-        ALooper* looper = ALooper_forThread();
-        ALooper_removeFd(looper, sock);
+    if (!(events & mask)) {
+        return;
     }
+    events &= (~mask);
+    ALooper* looper = ALooper_forThread();
+    jweak ref = getSelf(env, object);
+    ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, 
+                  events, callback, ref);
+        
 }
 
-static int on_write(int fd, jobject object) {
+static void resumeWriteEvent(JNIEnv *env, jobject object, int sock) {
+    int events = getEvents(env, object);
+    int mask = ALOOPER_EVENT_OUTPUT;
+    if (events & mask) {
+        return;
+    }
+    events |= mask;
+
+    ALooper* looper = ALooper_forThread();
+    jweak ref = getSelf(env, object);
+    ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, 
+                  events, callback, ref);
+}
+
+static int on_event(int fd, jobject object) {
     int n;
     JNIEnv *env = getEnv();
-    jboolean connecting;
-    connecting = getConnecting(env, object);
-    if (connecting) {
+    int sock = getSock(env, object);
+    SSL *ssl = getSSL(env, object);
+    int state = getState(env, object);
+    if (state == TCP_CONNECTING) {
         int error;
         socklen_t errorsize = sizeof(int);
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorsize);
@@ -126,75 +156,124 @@ static int on_write(int fd, jobject object) {
 
         if (error != 0) {
             LOG("connect error:%d, %s", error, strerror(error));
+            call_connect_cb(env, object, error);
+            return 0;
         }
-        setConnecting(env, object, 0);
-        call_connect_cb(env, object, error);
-        return 0;
-    }
 
-    int sock = getSock(env, object);
-    jbyteArray data = getData(env, object);
-    if (data == NULL) {
-        clearOutputEvent(env, object, sock);
-        return 0;
-    }
-    jsize len = (*env)->GetArrayLength(env, data);
-    jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
-    n = write_data(fd, bytes, len);
-    if (n < 0) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return -1;
-    } else {
-        int left = len - n;
-        jbyteArray d = (*env)->NewByteArray(env, left);
-        if (left) {
-            (*env)->SetByteArrayRegion(env, d, 0, left, bytes+n);
-        }
-        setData(env, object, d);
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        if (!left) {
-            clearOutputEvent(env, object, sock);
-        }
-        return 0;
-    }
-}
+        setState(env, object, TCP_SSL_CONNECTING);
 
-#define BUF_SIZE (64*1024)
-
-static int on_read(int fd, jobject object) {
-    JNIEnv *env = getEnv();
-    
-    while (1) {
-        int nread;
-        char buf[BUF_SIZE];
-
-        do {
-            nread = read(fd, buf, BUF_SIZE);
-        }while (nread < 0 && errno == EINTR);
-
-        if (nread < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        int r = SSL_connect(ssl);
+        if (r <= 0) {
+            int e = SSL_get_error(ssl, r);
+            if (e == SSL_ERROR_WANT_WRITE) {
+                suspendWriteEvent(env, object, sock);
                 return 0;
-            } else {
+            }
+            if (e == SSL_ERROR_WANT_READ) {
+                resumeWriteEvent(env, object, sock);
+                return 0;
+            }
+
+            call_connect_cb(env, object, e);
+        } else {
+            setState(env, object, TCP_READING);
+            call_connect_cb(env, object, 0);
+        }
+        return 0;
+    } else if (state == TCP_SSL_CONNECTING) {
+        int r = SSL_connect(ssl);
+        if (r <= 0) {
+            int e = SSL_get_error(ssl, r);
+            if (e == SSL_ERROR_WANT_WRITE) {
+                suspendWriteEvent(env, object, sock);
+                return 0;
+            }
+            if (e == SSL_ERROR_WANT_READ) {
+                resumeWriteEvent(env, object, sock);
+                return 0;
+            }
+
+            call_connect_cb(env, object, e);
+        } else {
+            setState(env, object, TCP_READING);
+            call_connect_cb(env, object, 0);
+        }
+    } else if (state == TCP_WRITING) {
+        jbyteArray data = getData(env, object);
+        if (data == NULL) {
+            setState(env, object, TCP_READING);
+            suspendWriteEvent(env, object, sock);
+            return 0;
+        }
+        jsize len = (*env)->GetArrayLength(env, data);
+        jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
+
+        n = SSL_write(ssl, bytes, len);
+        if (n <= 0) {
+            (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+            int e = SSL_get_error(ssl, n);
+            if (e == SSL_ERROR_WANT_WRITE) {
+                resumeWriteEvent(env, object, sock);
+                return 0;
+            }
+            if (e == SSL_ERROR_WANT_READ) {
+                suspendWriteEvent(env, object, sock);
+                return 0;
+            }
+            return -1;
+        } else {
+            int left = len - n;
+            jbyteArray d = (*env)->NewByteArray(env, left);
+            if (left) {
+                (*env)->SetByteArrayRegion(env, d, 0, left, bytes+n);
+            }
+            setData(env, object, d);
+            (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+            if (!left) {
+                setState(env, object, TCP_READING);
+                suspendWriteEvent(env, object, sock);
+            }
+            return 0;
+        }
+    } else if (state == TCP_READING) {
+        while (1) {
+            int nread;
+            char buf[BUF_SIZE];
+
+            do {
+                nread = SSL_read(ssl, buf, BUF_SIZE);
+            }while (nread < 0 && errno == EINTR);
+
+            if (nread < 0) {
+                int e = SSL_get_error(ssl, (int)nread);
+                if (e == SSL_ERROR_WANT_WRITE) {
+                    resumeWriteEvent(env, object, sock);
+                    return 0;
+                }
+                if (e == SSL_ERROR_WANT_READ) {
+                    suspendWriteEvent(env, object, sock);
+                    return 0;
+                }
                 call_read_cb(env, object, NULL, 0);
                 return -1;
-            }
-        } else if (nread == 0) {
-            call_read_cb(env, object, NULL, 0);
-            return 0;
-        } else {
-            call_read_cb(env, object, buf, nread);
-            if (nread < BUF_SIZE)
+
+            } else if (nread == 0) {
+                call_read_cb(env, object, NULL, 0);
                 return 0;
+            } else {
+                call_read_cb(env, object, buf, nread);
+                if (nread < BUF_SIZE)
+                    return 0;
+            }
         }
+        
     }
 }
 
 static void on_error(int fd, jobject object) {
     JNIEnv *env = getEnv();
-    jboolean connecting;
-    connecting = getConnecting(env, object);
-    if (connecting) {
+    int state = getState(env, object);
+    if (state == TCP_CONNECTING || state == TCP_SSL_CONNECTING) {
         int error = 0;
         socklen_t errorsize = sizeof(int);
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorsize);
@@ -203,7 +282,6 @@ static void on_error(int fd, jobject object) {
         } else {
             LOG("connect error:%d, %s", error, strerror(error));
         }
-        setConnecting(env, object, 0);
         call_connect_cb(env, object, error);
     } else {
         call_read_cb(env, object, NULL, 0);
@@ -226,15 +304,9 @@ static int callback(int fd, int events, void* data) {
         goto ERROR;
     }
 
-    if (events & ALOOPER_EVENT_INPUT) {
-        err = on_read(fd, object);
-        if (err) goto ERROR;
-    }
-    if (events & ALOOPER_EVENT_OUTPUT) {
-        err = on_write(fd, object);
-        if (err) goto ERROR;
-    }
-    
+    err = on_event(fd, object);
+    if (err) goto ERROR;
+
     return REGISTER_CALLBACK;
 
 ERROR:
@@ -242,55 +314,72 @@ ERROR:
 }
 
 JOWW(void, AsyncTCP_startRead)(JNIEnv *env, jobject object) {
-    int sock = getSock(env, object);
-    int events = getEvents(env, object);
-    events |= ALOOPER_EVENT_INPUT;
-    setEvents(env, object, events);
 
-    jweak self = getSelf(env, object);
-    ALooper* looper = ALooper_forThread();
-    ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, events, callback, self);
 }
 
 JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
     int n;
     jsize len;
     jbyte *bytes;
+    int state = getState(env, object);
+    SSL *ssl = getSSL(env, object);
     int sock = getSock(env, object);
     int events = getEvents(env, object);
 
-    if (events & ALOOPER_EVENT_OUTPUT) {
-        jbyteArray d = getData(env, object);
-        jbyteArray tmp = concatArray(env, d, data);
-        setData(env, object, tmp);
-        return;
+    jbyteArray d = getData(env, object);
+    data = concatArray(env, d, data);
+    setData(env, object, data);
+
+    if (state == TCP_READING) {
+        len = (*env)->GetArrayLength(env, data);
+        bytes = (*env)->GetByteArrayElements(env, data, NULL);
+
+        n = SSL_write(ssl, bytes, len);
+        if (n <= 0) {
+            (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+        } else {
+            int left = len - n;
+            d = (*env)->NewByteArray(env, left);
+            if (left) {
+                (*env)->SetByteArrayRegion(env, d, 0, left, bytes+n);
+            }
+            setData(env, object, d);
+            (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+            if (left) {
+                setState(env, object, TCP_WRITING);
+            }
+        }
     }
-    
+
+    data = getData(env, object);
     len = (*env)->GetArrayLength(env, data);
-    bytes = (*env)->GetByteArrayElements(env, data, NULL);
-    n = write_data(sock, bytes, len);
-    if (n < 0) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return;
-    } else {
-        jbyteArray tmp = getData(env, object);
-        tmp = concatBytes(env, tmp, bytes+n, len-n);
-        setData(env, object, tmp);
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return;
+    if (len > 0) {
+        resumeWriteEvent(env, object, sock);
     }
 }
 
 JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
+    SSL *ssl = getSSL(env, object);
+    SSL_CTX *ctx = getSSLCTX(env, object);
     int sock = getSock(env, object);
-    setEvents(env, object, 0);
     jweak self = getSelf(env, object);
+
+    setEvents(env, object, 0);
     (*env)->DeleteWeakGlobalRef(env, self);
     setSelf(env, object, NULL);
 
     ALooper* looper = ALooper_forThread();
     ALooper_removeFd(looper, sock);
     close(sock);
+
+    if (ssl) {
+        SSL_free(ssl);
+        setSSL(env, object, NULL);
+    }
+    if (ctx) {
+        SSL_CTX_free(ctx);
+        setSSLCTX(env, object, NULL);
+    }
 }
 
 JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
@@ -298,7 +387,7 @@ JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
     int r;
     int sockfd;
     const char *h;
-    int events = ALOOPER_EVENT_OUTPUT;
+    int events = ALOOPER_EVENT_OUTPUT|ALOOPER_EVENT_INPUT;
     struct sockaddr_in addr;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
@@ -323,20 +412,21 @@ JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
         }
     }
 
+    SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
+    SSL *ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sockfd);
+    
+    setSSLCTX(env, object, ctx);
+    setSSL(env, object, ssl);
     setSock(env, object, sockfd);
     setEvents(env, object, events);
-    setConnecting(env, object, 1);
+    setState(env, object, TCP_CONNECTING);
 
     jweak ref = (*env)->NewWeakGlobalRef(env, object);
     setSelf(env, object, ref);
     ALooper* looper = ALooper_forThread();
     ALooper_addFd(looper, sockfd, ALOOPER_POLL_CALLBACK, events, callback, ref);
     return JNI_TRUE;
-}
-
-jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-  javavm = vm;
-  return JNI_VERSION_1_4;
 }
 
 
@@ -360,17 +450,30 @@ static void setSelf(JNIEnv *env, jobject object, jweak self) {
     (*env)->SetLongField(env, object, field, (jlong)self);
 }
 
-static jboolean getConnecting(JNIEnv *env, jobject object) {
+static SSL_CTX* getSSLCTX(JNIEnv *env, jobject object) {
     jclass class = (*env)->GetObjectClass(env, object);
-    jfieldID field = (*env)->GetFieldID(env, class, "connecting", "Z");
-    jboolean connecting = (*env)->GetBooleanField(env, object, field);
-    return connecting;
+    jfieldID field = (*env)->GetFieldID(env, class, "sslCTX", "J");
+    jlong self = (*env)->GetLongField(env, object, field);
+    return (jobject)self;
 }
 
-static void setConnecting(JNIEnv *env, jobject object, jboolean connecting) {
+static void setSSLCTX(JNIEnv *env, jobject object, SSL_CTX *ctx) {
     jclass class = (*env)->GetObjectClass(env, object);
-    jfieldID field = (*env)->GetFieldID(env, class, "connecting", "Z");
-    (*env)->SetBooleanField(env, object, field, connecting);
+    jfieldID field = (*env)->GetFieldID(env, class, "sslCTX", "J");
+    (*env)->SetLongField(env, object, field, (jlong)ctx);
+}
+
+static SSL* getSSL(JNIEnv *env, jobject object) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "ssl", "J");
+    jlong ssl = (*env)->GetLongField(env, object, field);
+    return (SSL*)ssl;
+}
+
+static void setSSL(JNIEnv *env, jobject object, SSL *ssl) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "ssl", "J");
+    (*env)->SetLongField(env, object, field, (jlong)ssl);
 }
 
 static int getSock(JNIEnv *env, jobject object) {
@@ -398,6 +501,21 @@ static void setEvents(JNIEnv *env, jobject object, int events) {
     jfieldID field = (*env)->GetFieldID(env, class, "events", "I");
     (*env)->SetIntField(env, object, field, events);
 }
+
+
+static int getState(JNIEnv *env, jobject object) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "state", "I");
+    int events = (*env)->GetIntField(env, object, field);
+    return events;
+}
+
+static void setState(JNIEnv *env, jobject object, int state) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "state", "I");
+    (*env)->SetIntField(env, object, field, state);
+}
+
 
 static jbyteArray getData(JNIEnv *env, jobject object) {
     jclass class = (*env)->GetObjectClass(env, object);
@@ -447,3 +565,9 @@ static jbyteArray concatBytes(JNIEnv *env, jbyteArray arr,
     return tmp;
 }
 
+
+jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+  javavm = vm;
+  SSL_library_init();
+  return JNI_VERSION_1_4;
+}

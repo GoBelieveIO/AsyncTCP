@@ -44,7 +44,7 @@ public class AsyncTCPTest extends Activity  {
     		    	return;
     		    }
     		    Log.i("Beetle", "connected");
-    		    byte[] data = "GET / HTTP/1.1\r\nHost: www.baidu.com\r\nConnection: close\r\n\r\n".getBytes();
+    		    byte[] data = "GET / HTTP/1.1\r\nHost: www.taobao.com\r\nConnection: close\r\n\r\n".getBytes();
     		    tcp.writeData(data);
 
     		    tcp.startRead();
@@ -55,9 +55,9 @@ public class AsyncTCPTest extends Activity  {
     		    if (data.length == 0) {
     		    	try {
     		    		String result = new String(recvBuf, "UTF-8");
-    		    		Log.i("Beetle", result);
+                        Log.i("Beetle", "result 0-10:" + result.substring(0, 10));
     		    	} catch(Exception e) {
-
+                        e.printStackTrace();
     		    	}
     		    	Log.i("Beetle", "tcp closed");
     		    	tcp.close();
@@ -68,11 +68,11 @@ public class AsyncTCPTest extends Activity  {
 		        System.arraycopy(recvBuf, 0, result, 0, recvBuf.length); 
 		        System.arraycopy(data, 0, result, recvBuf.length, data.length);
 		        recvBuf = result;
-    		    Log.i("Beetle", "recv data");
+    		    Log.i("Beetle", "recv data:" + data.length + "-" + recvBuf.length);
     		}	
     		};
     	tcp.setConnectCallback(cb);
     	tcp.setReadCallback(read_cb);
-    	tcp.connect("www.baidu.com", 80);
+    	tcp.connect("www.taobao.com", 443);
     }
 }

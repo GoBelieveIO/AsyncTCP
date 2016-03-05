@@ -15,12 +15,20 @@
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
-LOCAL_CFLAGS := -g
+LOCAL_MODULE := libssl
+LOCAL_SRC_FILES := openssl/libs/$(TARGET_ARCH_ABI)/libssl.so
+LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/openssl/include
+include $(PREBUILT_SHARED_LIBRARY)
+
+
+include $(CLEAR_VARS)
+LOCAL_CFLAGS := -g -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
 LOCAL_MODULE    := async_tcp
 LOCAL_SRC_FILES := async_tcp.c socket.c
 
 LOCAL_LDLIBS = -landroid -llog
 
 
+LOCAL_SHARED_LIBRARIES := libssl
 
 include $(BUILD_SHARED_LIBRARY)
