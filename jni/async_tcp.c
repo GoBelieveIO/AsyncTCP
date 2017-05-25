@@ -112,6 +112,18 @@ static void clearOutputEvent(JNIEnv *env, jobject object, int sock) {
     }
 }
 
+static void addOutputEvent(JNIEnv *env, jobject object, int sock) {
+    int events = getEvents(env, object);
+    if (!(events & ALOOPER_EVENT_OUTPUT)) {
+        events |= ALOOPER_EVENT_OUTPUT;
+        setEvents(env, object, events);
+
+        jweak ref = getSelf(env, object);
+        ALooper* looper = ALooper_forThread();
+        ALooper_addFd(looper, sock, ALOOPER_POLL_CALLBACK, events, callback, ref);
+    }
+}
+
 static int on_write(int fd, jobject object) {
     int n;
     JNIEnv *env = getEnv();
@@ -265,7 +277,7 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
         setData(env, object, tmp);
         return;
     }
-    
+
     len = (*env)->GetArrayLength(env, data);
     bytes = (*env)->GetByteArrayElements(env, data, NULL);
     n = write_data(sock, bytes, len);
@@ -273,9 +285,12 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
         (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
         return;
     } else {
-        jbyteArray tmp = getData(env, object);
-        tmp = concatBytes(env, tmp, bytes+n, len-n);
-        setData(env, object, tmp);
+        if (n < len) {
+            jbyteArray tmp = getData(env, object);
+            tmp = concatBytes(env, tmp, bytes+n, len-n);
+            setData(env, object, tmp);
+            addOutputEvent(env, object, sock);
+        }
         (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
         return;
     }
@@ -438,12 +453,12 @@ static jbyteArray concatArray(JNIEnv *env, jbyteArray arr1, jbyteArray arr2) {
 
 static jbyteArray concatBytes(JNIEnv *env, jbyteArray arr, 
                               jbyte *bytes, int len) {
-    jbyteArray tmp;
+    jbyteArray r;
     jbyteArray d = (*env)->NewByteArray(env, len);
     if (len) {
         (*env)->SetByteArrayRegion(env, d, 0, len, bytes);
     }
-    tmp = concatArray(env, d, tmp);
-    return tmp;
+    r = concatArray(env, arr, d);
+    return r;
 }
 
