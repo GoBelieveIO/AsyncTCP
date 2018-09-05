@@ -14,11 +14,23 @@
 #
 LOCAL_PATH := $(call my-dir)
 
+#include $(CLEAR_VARS)
+#LOCAL_MODULE := libssl
+#LOCAL_SRC_FILES := openssl/libs/$(TARGET_ARCH_ABI)/libssl.so
+#LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/openssl/include
+#include $(PREBUILT_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libcrypto
+LOCAL_SRC_FILES := openssl/libs/$(TARGET_ARCH_ABI)/libcrypto.a
+LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/openssl/include
+include $(PREBUILT_STATIC_LIBRARY)
+
 include $(CLEAR_VARS)
 LOCAL_MODULE := libssl
-LOCAL_SRC_FILES := openssl/libs/$(TARGET_ARCH_ABI)/libssl.so
+LOCAL_SRC_FILES := openssl/libs/$(TARGET_ARCH_ABI)/libssl.a
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/openssl/include
-include $(PREBUILT_SHARED_LIBRARY)
+include $(PREBUILT_STATIC_LIBRARY)
 
 
 include $(CLEAR_VARS)
@@ -26,9 +38,9 @@ LOCAL_CFLAGS := -g -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
 LOCAL_MODULE    := async_tcp
 LOCAL_SRC_FILES := async_tcp.c socket.c
 
-LOCAL_LDLIBS = -landroid -llog
+#libssl must before libcrypto
+LOCAL_STATIC_LIBRARIES :=  libssl libcrypto
 
-
-LOCAL_SHARED_LIBRARIES := libssl
+LOCAL_LDLIBS = -landroid -llog -lz 
 
 include $(BUILD_SHARED_LIBRARY)
