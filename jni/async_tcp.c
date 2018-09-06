@@ -319,6 +319,35 @@ JOWW(void, AsyncTCP_startRead)(JNIEnv *env, jobject object) {
 
 }
 
+static void flush(JNIEnv *env, jobject object) {
+    SSL *ssl = getSSL(env, object);
+    jbyteArray data = getData(env, object);
+    jsize len = 0;
+    if (data != NULL) {
+        len = (*env)->GetArrayLength(env, data);
+    }
+    if (data == NULL || len == 0) {
+        return;
+    }
+    jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
+        
+    int n = SSL_write(ssl, bytes, len);
+    if (n <= 0) {
+        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+        int e = SSL_get_error(ssl, n);
+        LOG("ssl write err:%d", e);
+    } else {
+        int left = len - n;
+        jbyteArray d = (*env)->NewByteArray(env, left);
+        if (left) {
+            (*env)->SetByteArrayRegion(env, d, 0, left, bytes+n);
+        }
+        setData(env, object, d);
+        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+    }    
+}
+
+
 JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
     int n;
     jsize len;
@@ -331,14 +360,14 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
     jbyteArray d = getData(env, object);
     data = concatArray(env, d, data);
     setData(env, object, data);
-
-    if (state == TCP_READING) {
-        setState(env, object, TCP_WRITING);
-    }
-
+    
+    flush(env, object);
+    
+    data = getData(env, object);    
     len = (*env)->GetArrayLength(env, data);
     if (len > 0) {
         resumeWriteEvent(env, object, sock);
+        setState(env, object, TCP_WRITING);        
     }
 }
 
