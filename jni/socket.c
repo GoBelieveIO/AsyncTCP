@@ -45,6 +45,16 @@ struct sockaddr_in sock_addr(const char* host, unsigned short port) {
     return addr;
 }
 
+int ipv4_to_address (const char *host, unsigned short port, struct sockaddr_in *addr) {
+    int r;
+    r = inet_pton(AF_INET, host, &(addr->sin_addr));
+    if (r == 1) {
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(port);
+        return 0;
+    }
+    return -1;
+}
 
 int sock_nonblock(int fd, int set) {
     int r;

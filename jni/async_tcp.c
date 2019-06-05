@@ -188,10 +188,12 @@ static int on_read(int fd, jobject object) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return 0;
             } else {
+                LOG("read error:%d, %s", errno, strerror(errno));
                 call_read_cb(env, object, NULL, 0);
                 return -1;
             }
         } else if (nread == 0) {
+            LOG("read 0");
             call_read_cb(env, object, NULL, 0);
             return 0;
         } else {
@@ -323,7 +325,12 @@ JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
     sock_nonblock(sockfd, 1);
 
     h =  (*env)->GetStringUTFChars(env, host, NULL);
-    addr = sock_addr(h, port);
+
+    r = ipv4_to_address(h, port, &addr);
+    if (r == -1) {
+        LOG("dns resolve:%s", h);
+        addr = sock_addr(h, port);
+    }
 
     (*env)->ReleaseStringUTFChars(env, host, h);
 
