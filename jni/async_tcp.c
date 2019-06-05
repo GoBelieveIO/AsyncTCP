@@ -13,6 +13,7 @@
 #include <sys/uio.h> /* writev */
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <strings.h>
 #include <netdb.h>
 #include <assert.h>
 
@@ -316,26 +317,32 @@ JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
     int sockfd;
     const char *h;
     int events = ALOOPER_EVENT_OUTPUT;
-    struct sockaddr_in addr;
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_storage addr;
+
+    bzero(&addr, sizeof(addr));
+    h = (*env)->GetStringUTFChars(env, host, NULL);
+    r = ip_to_address(h, port, &addr);
+    if (r == -1) {
+        LOG("dns resolve:%s", h);
+        r = sock_addr(h, port, &addr);
+    }
+    (*env)->ReleaseStringUTFChars(env, host, h);
+    if (r == -1) {
+        LOG("can't get socket address");
+        return JNI_FALSE;
+    }
+
+    sa_family_t family = ((struct sockaddr*)&addr)->sa_family;
+    socklen_t  addr_len = family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+    sockfd = socket(family, SOCK_STREAM, 0);
     if (sockfd == -1) {
     	LOG("socket err:%d", errno);
         return JNI_FALSE;
     }
     sock_nonblock(sockfd, 1);
-
-    h =  (*env)->GetStringUTFChars(env, host, NULL);
-
-    r = ipv4_to_address(h, port, &addr);
-    if (r == -1) {
-        LOG("dns resolve:%s", h);
-        addr = sock_addr(h, port);
-    }
-
-    (*env)->ReleaseStringUTFChars(env, host, h);
-
+    
     do {
-    	r = connect(sockfd, (const struct sockaddr*)&addr, sizeof(addr));
+    	r = connect(sockfd, (const struct sockaddr*)&addr, addr_len);
     } while (r == -1 && errno == EINTR);
     if (r == -1) {
         if (errno != EINPROGRESS) {
