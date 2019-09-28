@@ -17,10 +17,8 @@
 #include <strings.h>
 #include <stdio.h>
 
-struct sockaddr_in sock_addr(const char* host, unsigned short port) {
+int sock_addr(const char* host, unsigned short port, struct sockaddr_storage *addr) {
     char port_str[10] = {0};
-    struct sockaddr_in addr;
-    bzero(&addr, sizeof(addr));
     sprintf(port_str, "%hu", port);
     
     struct addrinfo hints, *res, *res0;
@@ -32,19 +30,54 @@ struct sockaddr_in sock_addr(const char* host, unsigned short port) {
     int gai_error = getaddrinfo(host, port_str, &hints, &res0);
     
     if (gai_error) {
-        return addr;
+        return -1;
     }
 
+    int r = -1;
     for(res = res0; res != NULL; res = res->ai_next) {
         if (res->ai_family == AF_INET) {
-            memcpy(&addr, res->ai_addr, res->ai_addrlen);
+            memcpy(addr, res->ai_addr, res->ai_addrlen);
+            r = 0;
             break;
         }
     }
+
+    //prefer ipv4
+    if (r == 0) {
+        freeaddrinfo(res0);
+        return r;
+    }
+    
+    for(res = res0; res != NULL; res = res->ai_next) {
+        if (res->ai_family == AF_INET6) {
+            memcpy(addr, res->ai_addr, res->ai_addrlen);
+            r = 0;
+            break;
+        }
+    }
+    
     freeaddrinfo(res0);
-    return addr;
+    return r;
 }
 
+int ip_to_address (const char *host, unsigned short port, struct sockaddr_storage *addr) {
+    int r;
+    struct sockaddr_in *ipv4_addr = (struct sockaddr_in*)addr;
+    struct sockaddr_in6 *ipv6_addr = (struct sockaddr_in6*)addr;    
+    r = inet_pton(AF_INET, host, &(ipv4_addr->sin_addr));
+    if (r == 1) {
+        ipv4_addr->sin_family = AF_INET;
+        ipv4_addr->sin_port = htons(port);
+        return 0;
+    }
+
+    r = inet_pton(AF_INET6, host, &(ipv6_addr->sin6_addr));
+    if (r == 1) {
+        ipv6_addr->sin6_family = AF_INET6;
+        ipv6_addr->sin6_port = htons(port);
+    }
+    return -1;
+}
 
 int sock_nonblock(int fd, int set) {
     int r;
