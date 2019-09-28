@@ -2,7 +2,6 @@ package com.beetle;
 
 import android.app.Activity;
 import android.os.Bundle;
-import	android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -11,7 +10,7 @@ import android.widget.Button;
 
 
 public class AsyncTCPTest extends Activity  {
-	AsyncTCP tcp;
+	AsyncSSLTCP tcp;
 	byte[] recvBuf = new byte[0];
     @Override
     public void onCreate(Bundle savedInstanceState)
@@ -33,7 +32,7 @@ public class AsyncTCPTest extends Activity  {
     
     public void test() {
     	if (tcp != null) return;
-    	tcp = new AsyncTCP();
+    	tcp = new AsyncSSLTCP();
 
     	
     	TCPConnectCallback cb = new TCPConnectCallback() {
@@ -49,7 +48,7 @@ public class AsyncTCPTest extends Activity  {
 
     		    tcp.startRead();
     		}
-    	    };
+    	};
     	TCPReadCallback read_cb = new TCPReadCallback() {
     		public void onRead(Object tcp1, byte[] data) {
     		    if (data.length == 0) {
@@ -70,7 +69,7 @@ public class AsyncTCPTest extends Activity  {
 		        recvBuf = result;
     		    Log.i("Beetle", "recv data:" + data.length + "-" + recvBuf.length);
     		}	
-    		};
+    	};
     	tcp.setConnectCallback(cb);
     	tcp.setReadCallback(read_cb);
     	tcp.connect("www.taobao.com", 443);

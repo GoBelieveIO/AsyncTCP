@@ -1,8 +1,6 @@
 package com.beetle;
 
-import java.lang.ref.WeakReference;
-
-public class AsyncTCP {
+public class AsyncSSLTCP {
     private int sock;
     private int events;
     private int state;
@@ -31,6 +29,6 @@ public class AsyncTCP {
   
 
     static {
-        System.loadLibrary("async_tcp");
+        System.loadLibrary("async_ssl_tcp");
     }
 }

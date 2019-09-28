@@ -315,7 +315,7 @@ ERROR:
     return UNREGISTER_CALLBACK;
 }
 
-JOWW(void, AsyncTCP_startRead)(JNIEnv *env, jobject object) {
+JOWW(void, AsyncSSLTCP_startRead)(JNIEnv *env, jobject object) {
 
 }
 
@@ -348,7 +348,7 @@ static void flush(JNIEnv *env, jobject object) {
 }
 
 
-JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
+JOWW(void, AsyncSSLTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
     int n;
     jsize len;
     jbyte *bytes;
@@ -372,7 +372,7 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
     }
 }
 
-JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
+JOWW(void, AsyncSSLTCP_close)(JNIEnv *env, jobject object) {
     SSL *ssl = getSSL(env, object);
     SSL_CTX *ctx = getSSLCTX(env, object);
     int sock = getSock(env, object);
@@ -396,7 +396,7 @@ JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
     }
 }
 
-JOWW(jboolean, AsyncTCP_connect)(JNIEnv *env, jobject object,
+JOWW(jboolean, AsyncSSLTCP_connect)(JNIEnv *env, jobject object,
                              jstring host, jint port) {
     int r;
     int sockfd;

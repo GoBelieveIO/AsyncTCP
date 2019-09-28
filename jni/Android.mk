@@ -35,7 +35,7 @@ include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_CFLAGS := -g -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
-LOCAL_MODULE    := async_tcp
+LOCAL_MODULE    := async_ssl_tcp
 LOCAL_SRC_FILES := async_tcp.c socket.c
 
 #libssl must before libcrypto
