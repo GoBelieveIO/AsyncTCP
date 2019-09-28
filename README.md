@@ -9,7 +9,5 @@ Todo
 
 Run
 --------
-1.生成build.xml android update project -p .
-2.编译ndk ndk-build
-3.编译apk ant debug
-4.安装apk adb install bin/AsyncTCPTest-debug.apk
+1.编译ndk ndk-build
+
