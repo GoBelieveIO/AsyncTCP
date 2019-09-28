@@ -157,7 +157,7 @@ static int on_event(int fd, jobject object) {
         if (error != 0) {
             LOG("connect error:%d, %s", error, strerror(error));
             call_connect_cb(env, object, error);
-            return 0;
+            return -1;
         }
 
         setState(env, object, TCP_SSL_CONNECTING);
