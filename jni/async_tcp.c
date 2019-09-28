@@ -166,11 +166,11 @@ static int on_event(int fd, jobject object) {
         if (r <= 0) {
             int e = SSL_get_error(ssl, r);
             if (e == SSL_ERROR_WANT_WRITE) {
-                suspendWriteEvent(env, object, sock);
+                resumeWriteEvent(env, object, sock);                
                 return 0;
             }
             if (e == SSL_ERROR_WANT_READ) {
-                resumeWriteEvent(env, object, sock);
+                suspendWriteEvent(env, object, sock);            
                 return 0;
             }
 
@@ -186,11 +186,12 @@ static int on_event(int fd, jobject object) {
         if (r <= 0) {
             int e = SSL_get_error(ssl, r);
             if (e == SSL_ERROR_WANT_WRITE) {
-                suspendWriteEvent(env, object, sock);
+                resumeWriteEvent(env, object, sock);                
+
                 return 0;
             }
             if (e == SSL_ERROR_WANT_READ) {
-                resumeWriteEvent(env, object, sock);
+                suspendWriteEvent(env, object, sock);
                 return 0;
             }
 
