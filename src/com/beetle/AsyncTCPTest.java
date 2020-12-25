@@ -1,8 +1,17 @@
+/*                                                                            
+  Copyright (c) 2014-2019, GoBelieve     
+    All rights reserved.		    				     			
+ 
+  This source code is licensed under the BSD-style license found in the
+  LICENSE file in the root directory of this source tree. An additional grant
+  of patent rights can be found in the PATENTS file in the same directory.
+*/
+
+
 package com.beetle;
 
 import android.app.Activity;
 import android.os.Bundle;
-import	android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -11,29 +20,43 @@ import android.widget.Button;
 
 
 public class AsyncTCPTest extends Activity  {
-	AsyncTCP tcp;
+	AsyncTCPInterface tcp;
+
 	byte[] recvBuf = new byte[0];
     @Override
     public void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
-        Button bt = new Button(this);
-        bt.setText( "start" );
-        setContentView(bt);
-        
+
+        setContentView(R.layout.activity_test);
+
+        Button bt = (Button)findViewById(R.id.button);
+        Button bt2 = (Button)findViewById(R.id.button2);
                 
         bt.setOnClickListener(new OnClickListener() {
 			@Override
 			public void onClick(View arg0) {
-				test();
+				test(false);
 			}
 		});
-    }
+
+		bt2.setOnClickListener(new OnClickListener() {
+			@Override
+			public void onClick(View arg0) {
+				test(true);
+			}
+		});
+
+	}
     
     
-    public void test() {
+    public void test(boolean ssl) {
     	if (tcp != null) return;
-    	tcp = new AsyncTCP();
+    	if (ssl) {
+			tcp = new AsyncSSLTCP();
+		} else {
+			tcp = new AsyncTCP();
+		}
 
     	
     	TCPConnectCallback cb = new TCPConnectCallback() {
@@ -49,7 +72,7 @@ public class AsyncTCPTest extends Activity  {
 
     		    tcp.startRead();
     		}
-    	    };
+    	};
     	TCPReadCallback read_cb = new TCPReadCallback() {
     		public void onRead(Object tcp1, byte[] data) {
     		    if (data.length == 0) {
@@ -61,6 +84,7 @@ public class AsyncTCPTest extends Activity  {
     		    	}
     		    	Log.i("Beetle", "tcp closed");
     		    	tcp.close();
+    		    	tcp = null;
     		    	return;
     		    }
     		    
@@ -70,9 +94,15 @@ public class AsyncTCPTest extends Activity  {
 		        recvBuf = result;
     		    Log.i("Beetle", "recv data");
     		}	
-    		};
+    	};
+
     	tcp.setConnectCallback(cb);
     	tcp.setReadCallback(read_cb);
-    	tcp.connect("www.baidu.com", 80);
+
+    	int port = 80;
+    	if (ssl) {
+    		port = 443;
+		}
+    	tcp.connect("www.baidu.com", port);
     }
 }

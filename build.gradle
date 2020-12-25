@@ -4,7 +4,7 @@ buildscript {
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.4.2'
+        classpath 'com.android.tools.build:gradle:3.6.3'    
     }
 }
 
@@ -19,12 +19,12 @@ allprojects {
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 25
+    compileSdkVersion 29
     buildToolsVersion '28.0.3'
     
     defaultConfig {
         minSdkVersion 18
-        targetSdkVersion 25
+        targetSdkVersion 29
         versionCode 1020
         versionName "1.0.2"
     }
@@ -38,6 +38,12 @@ android {
             aidl.srcDirs = ['src']
             jniLibs.srcDirs = ['libs']
             assets.srcDirs = ['src/main/assets', 'assets/']
+        }
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path file('jni/Android.mk')
         }
     }
 
