@@ -69,6 +69,9 @@ static int getEvents(JNIEnv *env, jobject object);
 
 static void setEvents(JNIEnv *env, jobject object, int events);
 
+static jboolean getClosed(JNIEnv *env, jobject object);
+static void setClosed(JNIEnv *env, jobject object, jboolean closed);
+
 static jbyteArray getData(JNIEnv *env, jobject object);
 
 static void setData(JNIEnv *env, jobject object, jbyteArray bytes);
@@ -302,6 +305,11 @@ static int callback(int fd, int events, void* data) {
         goto ERROR;
     }
 
+    if (getClosed(env, object)) {
+        LOG("ignore callback event after tcp has been closed.");
+        goto ERROR;
+    }
+
     if (events & ALOOPER_EVENT_ERROR) {
         on_error(fd, object);
         goto ERROR;
@@ -373,17 +381,22 @@ JOWW(void, AsyncSSLTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) 
 }
 
 JOWW(void, AsyncSSLTCP_close)(JNIEnv *env, jobject object) {
+    int sock = getSock(env, object);
+    setEvents(env, object, 0);
+    setClosed(env, object, JNI_TRUE);
+    ALooper* looper = ALooper_forThread();
+    ALooper_removeFd(looper, sock);
+}
+
+JOWW(void, AsyncSSLTCP_release)(JNIEnv *env, jobject object) {
     SSL *ssl = getSSL(env, object);
     SSL_CTX *ctx = getSSLCTX(env, object);
     int sock = getSock(env, object);
     jweak self = getSelf(env, object);
 
-    setEvents(env, object, 0);
     (*env)->DeleteWeakGlobalRef(env, self);
     setSelf(env, object, NULL);
 
-    ALooper* looper = ALooper_forThread();
-    ALooper_removeFd(looper, sock);
     close(sock);
 
     if (ssl) {
@@ -529,6 +542,18 @@ static void setEvents(JNIEnv *env, jobject object, int events) {
     (*env)->SetIntField(env, object, field, events);
 }
 
+static jboolean getClosed(JNIEnv *env, jobject object) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "closed", "Z");
+    int events = (*env)->GetBooleanField(env, object, field);
+    return events;
+}
+
+static void setClosed(JNIEnv *env, jobject object, jboolean closed) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "closed", "Z");
+    (*env)->SetBooleanField(env, object, field, closed);
+}
 
 static int getState(JNIEnv *env, jobject object) {
     jclass class = (*env)->GetObjectClass(env, object);

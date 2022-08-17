@@ -53,6 +53,9 @@ static int getEvents(JNIEnv *env, jobject object);
 
 static void setEvents(JNIEnv *env, jobject object, int events);
 
+static jboolean getClosed(JNIEnv *env, jobject object);
+static void setClosed(JNIEnv *env, jobject object, jboolean closed);
+
 static jbyteArray getData(JNIEnv *env, jobject object);
 
 static void setData(JNIEnv *env, jobject object, jbyteArray bytes);
@@ -231,8 +234,14 @@ static int callback(int fd, int events, void* data) {
     int err = 0;
     JNIEnv *env = getEnv();
     jweak wref = (jweak)data;
+
     jobject object = (*env)->NewLocalRef(env, wref);
     if (!object) {
+        goto ERROR;
+    }
+
+    if (getClosed(env, object)) {
+        LOG("ignore callback event after tcp has been closed.");
         goto ERROR;
     }
 
@@ -249,7 +258,7 @@ static int callback(int fd, int events, void* data) {
         err = on_write(fd, object);
         if (err) goto ERROR;
     }
-    
+
     return REGISTER_CALLBACK;
 
 ERROR:
@@ -302,12 +311,16 @@ JOWW(void, AsyncTCP_writeData)(JNIEnv *env, jobject object, jbyteArray data) {
 JOWW(void, AsyncTCP_close)(JNIEnv *env, jobject object) {
     int sock = getSock(env, object);
     setEvents(env, object, 0);
+    setClosed(env, object, JNI_TRUE);
+    ALooper* looper = ALooper_forThread();
+    ALooper_removeFd(looper, sock);
+}
+
+JOWW(void, AsyncTCP_release)(JNIEnv *env, jobject object) {
+    int sock = getSock(env, object);
     jweak self = getSelf(env, object);
     (*env)->DeleteWeakGlobalRef(env, self);
     setSelf(env, object, NULL);
-
-    ALooper* looper = ALooper_forThread();
-    ALooper_removeFd(looper, sock);
     close(sock);
 }
 
@@ -428,12 +441,26 @@ static void setEvents(JNIEnv *env, jobject object, int events) {
     (*env)->SetIntField(env, object, field, events);
 }
 
+static jboolean getClosed(JNIEnv *env, jobject object) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "closed", "Z");
+    jboolean closed = (*env)->GetBooleanField(env, object, field);
+    return closed;
+}
+
+static void setClosed(JNIEnv *env, jobject object, jboolean closed) {
+    jclass class = (*env)->GetObjectClass(env, object);
+    jfieldID field = (*env)->GetFieldID(env, class, "closed", "Z");
+    (*env)->SetBooleanField(env, object, field, closed);
+}
+
 static jbyteArray getData(JNIEnv *env, jobject object) {
     jclass class = (*env)->GetObjectClass(env, object);
     jfieldID field = (*env)->GetFieldID(env, class, "data", "[B");
     jbyteArray bytes = (*env)->GetObjectField(env, object, field);
     return bytes;
 }
+
 
 static void setData(JNIEnv *env, jobject object, jbyteArray bytes) {
     jclass class = (*env)->GetObjectClass(env, object);
